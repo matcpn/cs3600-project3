@@ -90,49 +90,24 @@ int findTheColon(char* c) {
 	return -1;
 } 
 
-//return location of dot
-int findNextDot(char* domain) {
-	int i = 0;
-	for (; *(domain + i) != '\0'; i++) {
-		if(*(domain + i) == '.') {
-			return i;
-		}
-	}
-	if (*(domain + i) == '\0') {
-		return i;
-	}
-	return -1;
-}
-
-void parseArguments(char* argv[], char** parsedArgs, int* numberOfDots) {
+void parseArguments(char* argv[], char* parsedArgs[]) {
 	if (*argv[1] == '-') {
 		// We were given -ns|-mx flags and need to respond accordingly
+		parsedArgs[0] = *argv[1];
 	}
 	else if (*argv[1] == '@') {
 		int colonLocation = findTheColon(argv[1]);
 		if (colonLocation > 0) {
-			//we know we have a port
+			//we know we have a non-default port
 		}
 		else {
 			//use DEFAULTPORT global variable
-			**parsedArgs = calloc(15, sizeof(char)); // first arg is server, (xxx.xxx.xxx.xxx = 15 chars max)
-			strcpy(*parsedArgs, argv[1] + 1);
-			**(parsedArgs + 1) = calloc(2, sizeof(char)); //2nd arg is port, using default here
-			**(parsedArgs + 1) = DEFAULTPORT;
-			char* domain = calloc(256, sizeof(char)); // 256 max domain name size, we looked this one up
-			strcpy(domain, argv[2]);
-			int i = 2; //starting point for the dynamic array
-			while(*domain != '\0') {
-				int nextDot = findNextDot(domain);
-				if (nextDot > 0) {
-					**(parsedArgs + i) = calloc(nextDot + 1, sizeof(char));
-					sprintf(**(parsedArgs + i), "%d", nextDot);
-					strncpy(**(parsedArgs + i) + 1, domain, nextDot);
-					domain = *(domain + nextDot);
-					i++;
-					*numberOfDots++;
-				}
-			}
+			parsedArgs[1] = calloc(15, sizeof(char)); // first arg is server, (xxx.xxx.xxx.xxx = 15 chars max)
+			strcpy(parsedArgs[1], argv[1] + 1);
+			parsedArgs[2] = calloc(2, sizeof(char)); //2nd arg is port, using default here
+			sprintf(parsedArgs[2], "%d", DEFAULTPORT);
+			parsedArgs[3] = calloc(256, sizeof(char)); // 256 max domain name size, we looked this one up
+			strcpy(parsedArgs[3], argv[2]);
 		}
 	}
 	else {
@@ -151,62 +126,80 @@ int main(int argc, char *argv[]) {
    */
 
   // process the arguments
-   char** parsedArgs;
-   int numberOfDots = 0;
-   parseArguments(argv, parsedArgs, &numberOfDots);
+   char* parsedArgs[4];
+   parseArguments(argv, parsedArgs);
 
   // construct the DNS request
    int domainLen = 0;
    if (*argv[1] == '-') {
-		domainLen = strlen(argv[2]);
+		domainLen = strlen(argv[3]);
    }
    else {
- 		domainLen = strlen(argv[1]);
+ 		domainLen = strlen(argv[2]);
    }
-   char* question = calloc(domainLen+2, sizeof(char));
-   for (int i = 2; i < numberOfDots + 2; i++) {
-   	strcat(question, **(parsedArgs + i));
-   }
-   *(question + domainLen + 1) = 0x0;
-   *(question + domainLen + 2) = 0x0;
 
-   char* header = calloc(12, sizeof(char));
+   char* domainName = parsedArgs[3];
+   char* question = calloc(domainLen + 6, sizeof(char));
+   int offset = 0;
+   int lengthOfSubdomain = 0;
+   while (offset < domainLen) {
+	   while (domainName[offset] != '.' && domainName[offset] != '\0') {
+	   		question[offset+1] = domainName[offset];
+	   		lengthOfSubdomain++;
+	   		offset++;
+		}
+		question[offset-lengthOfSubdomain] = lengthOfSubdomain;
+		lengthOfSubdomain = 0;
+		offset++;
+	}
+
+	//null terminator
+	question[domainLen + 1] = 0x0;
+	//QTYPE
+   	question[domainLen + 2] = 0x0;
+   	question[domainLen + 3] = 0x1; //A Record
+   	//QCLASS = 1
+   	question[domainLen + 4] = 0x0;
+   	question[domainLen + 5] = 0x1;
+
+   unsigned char header[12];
    //id is 1337
-   *header = 0x05;
-   *(header + 1) = 0x39; 
+   header[0] = 0x05;
+   header[1] = 0x39; 
    //qr is 0, opcode is 0000, AA is 0, TC is 0, RD is 1
-   *(header + 2) = 0x1; 
+   header[2] = 0x1; 
    //RA is 0, Z is 000, RCODE is 0000
-   *(header + 3) = 0x0;
+   header[3] = 0x0;
    //QDCOUNT = 1
-   *(header + 4) = 0x0;
-   *(header + 5) = 0x1; 
+   header[4] = 0x0;
+   header[5] = 0x1; 
    //ANCOUNT = 0
-   *(header + 6) = 0x0; 
-   *(header + 7) = 0x0; 
+   header[6] = 0x0; 
+   header[7] = 0x0; 
    //NSCOUNT = 0
-   *(header + 8) = 0x0; 
-   *(header + 9) = 0x0;
+   header[8] = 0x0; 
+   header[9] = 0x0;
    //ARCOUNT = 0
-   *(header + 10) = 0x0; 
-   *(header + 11) = 0x0; 
+   header[10] = 0x0; 
+   header[11] = 0x0; 
 
-   char* packet = calloc(domainLen + 14, sizeof(char));
-   strcpy(packet, header);
-   strcat(packet, question);
+   char* packet = calloc(domainLen + 18, sizeof(char));
+   memcpy(packet, header, 12);
+   memcpy(packet+12, question, domainLen+6);
 
   // send the DNS request (and call dump_packet with your request)
-  
+  dump_packet(packet, domainLen + 18);
+
   // first, open a UDP socket  
   int sock = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
 
   // next, construct the destination address
   struct sockaddr_in out;
   out.sin_family = AF_INET;
-  out.sin_port = htons(**(parsedArgs + 1));
-  out.sin_addr.s_addr = inet_addr(**parsedArgs);
+  out.sin_port = htons(parsedArgs[2]);
+  out.sin_addr.s_addr = inet_addr(parsedArgs[1]);
 
-  if (sendto(sock, packet, domainLen + 14, 0, &out, sizeof(out)) < 0) {
+  if (sendto(sock, packet, domainLen + 18, 0, &out, sizeof(out)) < 0) {
     // an error occurred
   }
 
