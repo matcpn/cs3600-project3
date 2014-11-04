@@ -81,6 +81,67 @@ static void dump_packet(unsigned char *data, int size) {
     }
 }
 
+int findTheColon(char* c) {
+	for (int i = 0; *(c + i) != '\0'; i++) {
+		if (*(c + i) == ':') {
+			return i;
+		}
+	}
+	return -1;
+} 
+
+//return location of dot
+int findNextDot(char* domain) {
+	int i = 0;
+	for (; *(domain + i) != '\0'; i++) {
+		if(*(domain + i) == '.') {
+			return i;
+		}
+	}
+	if (*(domain + i) == '\0') {
+		return i;
+	}
+	return -1;
+}
+
+void parseArguments(char* argv[], char** parsedArgs, int* numberOfDots) {
+	if (*argv[1] == '-') {
+		// We were given -ns|-mx flags and need to respond accordingly
+	}
+	else if (*argv[1] == '@') {
+		int colonLocation = findTheColon(argv[1]);
+		if (colonLocation > 0) {
+			//we know we have a port
+		}
+		else {
+			//use DEFAULTPORT global variable
+			**parsedArgs = calloc(15, sizeof(char)); // first arg is server, (xxx.xxx.xxx.xxx = 15 chars max)
+			strcpy(*parsedArgs, argv[1] + 1);
+			**(parsedArgs + 1) = calloc(2, sizeof(char)); //2nd arg is port, using default here
+			**(parsedArgs + 1) = DEFAULTPORT;
+			char* domain = calloc(256, sizeof(char)); // 256 max domain name size, we looked this one up
+			strcpy(domain, argv[2]);
+			int i = 2; //starting point for the dynamic array
+			while(*domain != '\0') {
+				int nextDot = findNextDot(domain);
+				if (nextDot > 0) {
+					**(parsedArgs + i) = calloc(nextDot + 1, sizeof(char));
+					sprintf(**(parsedArgs + i), "%d", nextDot);
+					strncpy(**(parsedArgs + i) + 1, domain, nextDot);
+					domain = *(domain + nextDot);
+					i++;
+					*numberOfDots++;
+				}
+			}
+		}
+	}
+	else {
+		//we shouldn't get here, this is invalid input
+		printf("Error: Invalid Syntax");
+	}
+
+}
+
 int main(int argc, char *argv[]) {
   /**
    * I've included some basic code for opening a socket in C, sending
@@ -90,8 +151,49 @@ int main(int argc, char *argv[]) {
    */
 
   // process the arguments
+   char** parsedArgs;
+   int numberOfDots = 0;
+   parseArguments(argv, parsedArgs, &numberOfDots);
 
   // construct the DNS request
+   int domainLen = 0;
+   if (*argv[1] == '-') {
+		domainLen = strlen(argv[2]);
+   }
+   else {
+ 		domainLen = strlen(argv[1]);
+   }
+   char* question = calloc(domainLen+2, sizeof(char));
+   for (int i = 2; i < numberOfDots + 2; i++) {
+   	strcat(question, **(parsedArgs + i));
+   }
+   *(question + domainLen + 1) = 0x0;
+   *(question + domainLen + 2) = 0x0;
+
+   char* header = calloc(12, sizeof(char));
+   //id is 1337
+   *header = 0x05;
+   *(header + 1) = 0x39; 
+   //qr is 0, opcode is 0000, AA is 0, TC is 0, RD is 1
+   *(header + 2) = 0x1; 
+   //RA is 0, Z is 000, RCODE is 0000
+   *(header + 3) = 0x0;
+   //QDCOUNT = 1
+   *(header + 4) = 0x0;
+   *(header + 5) = 0x1; 
+   //ANCOUNT = 0
+   *(header + 6) = 0x0; 
+   *(header + 7) = 0x0; 
+   //NSCOUNT = 0
+   *(header + 8) = 0x0; 
+   *(header + 9) = 0x0;
+   //ARCOUNT = 0
+   *(header + 10) = 0x0; 
+   *(header + 11) = 0x0; 
+
+   char* packet = calloc(domainLen + 14, sizeof(char));
+   strcpy(packet, header);
+   strcat(packet, question);
 
   // send the DNS request (and call dump_packet with your request)
   
@@ -101,10 +203,10 @@ int main(int argc, char *argv[]) {
   // next, construct the destination address
   struct sockaddr_in out;
   out.sin_family = AF_INET;
-  out.sin_port = htons(<<DNS server port number, as short>>);
-  out.sin_addr.s_addr = inet_addr(<<DNS server IP as char*>>);
+  out.sin_port = htons(**(parsedArgs + 1));
+  out.sin_addr.s_addr = inet_addr(**parsedArgs);
 
-  if (sendto(sock, <<your packet>>, <<packet len>>, 0, &out, sizeof(out)) < 0) {
+  if (sendto(sock, packet, domainLen + 14, 0, &out, sizeof(out)) < 0) {
     // an error occurred
   }
 
@@ -119,12 +221,13 @@ int main(int argc, char *argv[]) {
 
   // construct the timeout
   struct timeval t;
-  t.tv_sec = <<your timeout in seconds>>;
+  t.tv_sec = 5;
   t.tv_usec = 0;
 
+  char inputBuffer[65536];
   // wait to receive, or for a timeout
   if (select(sock + 1, &socks, NULL, NULL, &t)) {
-    if (recvfrom(sock, <<your input buffer>>, <<input len>>, 0, &in, &in_len) < 0) {
+    if (recvfrom(sock, inputBuffer, 65536, 0, &in, &in_len) < 0) {
       // an error occured
     }
   } else {
