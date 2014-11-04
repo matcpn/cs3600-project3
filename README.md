@@ -5,3 +5,9 @@ Our approach for the milestone was to set up the data structures for the header.
 To parse the arguments we had a few disagreements on how to structure and design the functions that would be doing dynamic allocation, as we were thinking in different mindsets. We ended up agreeing on one way over another arbitrarily as both the solutions we would think of would work, with just about the same amount of work. 
 
 We then took a break to prepare dinner and to eat snacks.
+
+We then realized that the way we were parsing the arguments required us to know the length of the domain name to create the data structure for holding the address. We realized that this was just not going to work, and had to rework our approach to parsing the arguments.
+
+Afterwards, we realized our tests were all failing because we never wrote the line to print the packet, cause we're bad at this apparently. 
+
+The last thing we did, that is part of our approach was making the size of the packet too small, which meant we were losing data and not printing out everything we needed.
