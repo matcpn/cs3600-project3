@@ -11,3 +11,16 @@ We then realized that the way we were parsing the arguments required us to know 
 Afterwards, we realized our tests were all failing because we never wrote the line to print the packet, cause we're bad at this apparently. 
 
 The last thing we did, that is part of our approach was making the size of the packet too small, which meant we were losing data and not printing out everything we needed.
+
+Final README
+The biggest challenge we faced after the Milestone was moving on from the header.
+
+It turns out that the struct for the header was stupid and just not maintainable by us once we listened to the bitwise operation method of doing this. We really didn't trust memcpy to keep the structure of the bytes in the struct and then transfer it over correctly to the char. It seemed like a headache that we didn't need.
+
+We then switched to doing the bitwise and operators to check that the hex we received back in our header was the hex we needed to look at, and that it was parsable.
+
+Our approach them switched to sanity-checking the header that we received back, because we have a pretty loose understanding of the entire transaction that is happening and needed to see all the values be correct.
+
+The next big thing that we needed to do was follow the pointers for the CNAME entries because we listened in class as to what we were supposed to do, and then the function we wrote was way longer than it was supposed to be, but it worked. 
+
+The CNAME entries were weird when we went to print out the address returned, things were nice at first but then didn't go so well once we tried the testing script. We were able to deduce that we were just off-by a certain amount. Following the trend of our DNS project, we just kind of fudged the numbers.

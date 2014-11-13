@@ -81,6 +81,10 @@ static void dump_packet(unsigned char *data, int size) {
     }
 }
 
+/**
+This function parses the arguments from stdin
+It returns them into the parseArguements array
+*/
 void parseArguments(char* argv[], char* parsedArgs[]) {
 	if (*argv[1] == '-') {
 		// We were given -ns|-mx flags and need to respond accordingly
@@ -93,12 +97,14 @@ void parseArguments(char* argv[], char* parsedArgs[]) {
       parsedArgs[1] = strtok(parsedArgs[1], ":");
       parsedArgs[2] = calloc(5, sizeof(char)); //2nd arg is port, using default here
       char* temp = strtok(NULL, ":");
+      // DEFAULTPORT is 53.
       parsedArgs[2] = 53;
+      // If the port exists, then atoi it to set the port, otherwise it will stay as 53
       if (temp != NULL) {
         parsedArgs[2] = atoi(temp);
       }
       parsedArgs[3] = calloc(256, sizeof(char)); // 256 max domain name size, we looked this one up
-      strcpy(parsedArgs[3], argv[2]);
+      strcpy(parsedArgs[3], argv[2]); // This is the name to query
 	}
 	else {
 		//we shouldn't get here, this is invalid input
@@ -107,11 +113,16 @@ void parseArguments(char* argv[], char* parsedArgs[]) {
 
 }
 
-/*
+/**
 The packet, the offset to where you want to start reading depending on the bits that you need the values of, and the domain name to return.
+This function will read the name out of the packet by either following the pointers (C0 bytes) or
+By reading an integer i, and then i number of characters after the integer. 
+
+The last value is a "boolean" bit
 */
 int readLabel(unsigned char* packet, int* offset, char* nameToReturn, int pointerFollowed) {
   
+  // Offset is after the header
   if (packet[*offset] != '\0') {
     // labelTag is whether or not its a pointer
     char labelTag = (packet[*offset] & 0xC0) >> 6;
@@ -120,18 +131,19 @@ int readLabel(unsigned char* packet, int* offset, char* nameToReturn, int pointe
     // Length of the label to read, the offset to start reading from after the label
     int charCounter, secondCharCounter, labelLength, nextOffset;
 
+    // Sets secondCharCounter to point end to of the string (right before where the dot goes)
     for (secondCharCounter = 0; nameToReturn[secondCharCounter] != '\0'; secondCharCounter++) {
       if (secondCharCounter > 255)
         return -1;
     }
+    // Basically we started hacking here because we either got extra dots or not enough dots
     if (!pointerFollowed) {
         nameToReturn[secondCharCounter] = '.';
         nameToReturn[secondCharCounter + 1] = '\0';
     }
 
-
     if (labelTag == 3) {
-      //we have a pointer
+      //we have a pointer and we need to bitwise and it to find the offset after the pointer
       nextOffset = ntohs(*((unsigned short *)(packet + *offset))) & 0x3fff;
       readLabel(packet, &nextOffset, nameToReturn, 1);
 
@@ -146,6 +158,7 @@ int readLabel(unsigned char* packet, int* offset, char* nameToReturn, int pointe
       for (charCounter = 1; charCounter <= labelLength; charCounter++) {
         char temp = packet[*offset + charCounter];
 
+        // Sets secondCharCounter to point end to of the string (right before where the dot goes)
         for (secondCharCounter = 0; nameToReturn[secondCharCounter] != '\0'; secondCharCounter++) {
           if (secondCharCounter > 255)
             return -1;
@@ -155,7 +168,9 @@ int readLabel(unsigned char* packet, int* offset, char* nameToReturn, int pointe
         nameToReturn[secondCharCounter + 1] = '\0';
       }
 
+      // Another hack to fix an off-by-one
       *offset = *offset + labelLength + 1;
+      // Not following a pointer, read the label.
       readLabel(packet, offset, nameToReturn, 0);
     }    
     else {
@@ -288,6 +303,7 @@ int main(int argc, char *argv[]) {
   unsigned char RA = (*(inputBuffer+2) & 0x80) >> 7;
   unsigned char RCODE = *(inputBuffer + 3) & 0xF;
 
+  /** Sanity checking the packet that was sent back to us */
   if (ID != 0x539) {
       printf("We got someone else's packet. Stealing all the money out of it");
       return -1;
@@ -320,6 +336,7 @@ int main(int argc, char *argv[]) {
     return -1;
   }
 
+  /** I hate switch statements but this one is perfect */
   switch(RCODE) {
     case 0:
       break;
@@ -346,7 +363,7 @@ int main(int argc, char *argv[]) {
   unsigned short QDCOUNT = ntohs(*((unsigned short *)(inputBuffer + 4)));
   unsigned short ANCOUNT = ntohs(*((unsigned short *)(inputBuffer + 6)));
 
-  //16 to skip past the header
+  //20 to skip past the header
   int nameOffset = 20 + domainLen;
 
   for(int i = 0; i < ANCOUNT; i++) {
@@ -354,12 +371,9 @@ int main(int argc, char *argv[]) {
     unsigned char ipReturned[5] = {0};
     //printf("\n%i\n", ANCOUNT);
     unsigned short ATYPE = ntohs(*((unsigned short *)(inputBuffer + nameOffset)));
-    nameOffset += 10; // skip past a bunch of stuff
+    nameOffset += 10; // skip past a bunch of stuff we basically kept messing with this until it was right
 
-    //dump_packet(inputBuffer, 188);
-    
-    //printf("%d\t%d\n", ATYPE, 0x0001);
-
+    // ATYPE is 1, get the IP out
     if (ATYPE == 0x0001) {
       ipReturned[0] = *(inputBuffer + nameOffset);
       nameOffset++;
