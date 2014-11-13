@@ -81,34 +81,24 @@ static void dump_packet(unsigned char *data, int size) {
     }
 }
 
-int findTheColon(char* c) {
-	for (int i = 0; *(c + i) != '\0'; i++) {
-		if (*(c + i) == ':') {
-			return i;
-		}
-	}
-	return -1;
-} 
-
 void parseArguments(char* argv[], char* parsedArgs[]) {
 	if (*argv[1] == '-') {
 		// We were given -ns|-mx flags and need to respond accordingly
 		parsedArgs[0] = *argv[1];
 	}
 	else if (*argv[1] == '@') {
-		int colonLocation = findTheColon(argv[1]);
-		if (colonLocation > 0) {
 			//we know we have a non-default port
-		}
-		else {
-			//use DEFAULTPORT global variable
-			parsedArgs[1] = calloc(15, sizeof(char)); // first arg is server, (xxx.xxx.xxx.xxx = 15 chars max)
-			strcpy(parsedArgs[1], argv[1] + 1);
-			parsedArgs[2] = calloc(2, sizeof(char)); //2nd arg is port, using default here
-			sprintf(parsedArgs[2], "%d", DEFAULTPORT);
-			parsedArgs[3] = calloc(256, sizeof(char)); // 256 max domain name size, we looked this one up
-			strcpy(parsedArgs[3], argv[2]);
-		}
+      parsedArgs[1] = calloc(15, sizeof(char)); // first arg is server, (xxx.xxx.xxx.xxx = 15 chars max)
+      strcpy(parsedArgs[1], argv[1] + 1);
+      parsedArgs[1] = strtok(parsedArgs[1], ":");
+      parsedArgs[2] = calloc(5, sizeof(char)); //2nd arg is port, using default here
+      char* temp = strtok(NULL, ":");
+      parsedArgs[2] = 53;
+      if (temp != NULL) {
+        parsedArgs[2] = atoi(temp);
+      }
+      parsedArgs[3] = calloc(256, sizeof(char)); // 256 max domain name size, we looked this one up
+      strcpy(parsedArgs[3], argv[2]);
 	}
 	else {
 		//we shouldn't get here, this is invalid input
@@ -199,7 +189,7 @@ int main(int argc, char *argv[]) {
   out.sin_port = htons(parsedArgs[2]);
   out.sin_addr.s_addr = inet_addr(parsedArgs[1]);
 
-  if (sendto(sock, packet, domainLen + 18, 0, &out, sizeof(out)) < 0) {
+  if (sendto(sock, packet, domainLen + 18, 0, (struct sockaddr *) &out, sizeof(out)) < 0) {
     // an error occurred
   }
 
@@ -220,14 +210,23 @@ int main(int argc, char *argv[]) {
   char inputBuffer[65536];
   // wait to receive, or for a timeout
   if (select(sock + 1, &socks, NULL, NULL, &t)) {
-    if (recvfrom(sock, inputBuffer, 65536, 0, &in, &in_len) < 0) {
+    if (recvfrom(sock, inputBuffer, 65536, 0, (struct sockaddr *) &in, &in_len) < 0) {
       // an error occured
     }
   } else {
     // a timeout occurred
+    printf("NORESPONSE\n");
+    return -1;
   }
 
   // print out the result
+  char* returned_header;
+  unsigned short ID = ntohs(*((unsigned short *) inputBuffer));
+  unsigned char RCODE = *(inputBuffer + 3) & 0xF;
+  if (RCODE == 3) {
+    printf("NOTFOUND\n");
+    return -1;
+  }
   
   return 0;
 }
