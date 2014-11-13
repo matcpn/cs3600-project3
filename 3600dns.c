@@ -350,18 +350,19 @@ int main(int argc, char *argv[]) {
   unsigned short ANCOUNT = ntohs(*((unsigned short *)(inputBuffer + 6)));
 
   //16 to skip past the header
-  int nameOffset = 16 + domainLen;
+  int nameOffset;
+  nameOffset = ((domainLen % 2 == 0) ? 20 + domainLen : 20 + domainLen);
 
   for(int i = 0; i < ANCOUNT; i++) {
     char nameReturned[256] = {0};
     unsigned char ipReturned[5] = {0};
-
+    printf("%i\n", nameOffset);
     unsigned short ATYPE = ntohs(*((unsigned short *)(inputBuffer + nameOffset)));
-    nameOffset += 14; // skip past a bunch of stuff
+    nameOffset += 10; // skip past a bunch of stuff
 
-    //dump_packet(inputBuffer, 188);
-    //printf("%i\n", nameOffset);
-    //printf("%d\t%d\n", ATYPE, 0x0001);
+    dump_packet(inputBuffer, 188);
+    
+    printf("%d\t%d\n", ATYPE, 0x0001);
 
     if (ATYPE == 0x0001) {
       ipReturned[0] = *(inputBuffer + nameOffset);
