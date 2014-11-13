@@ -110,12 +110,11 @@ void parseArguments(char* argv[], char* parsedArgs[]) {
 /*
 The packet, the offset to where you want to start reading depending on the bits that you need the values of, and the domain name to return.
 */
-int readLabel(unsigned char* packet, int* offset, char* nameToReturn) {
-  int isFirstLabel = 1;
-
-  while (packet[*offset] != '\0') {
+int readLabel(unsigned char* packet, int* offset, char* nameToReturn, int pointerFollowed) {
+  
+  if (packet[*offset] != '\0') {
     // labelTag is whether or not its a pointer
-    char labelTag = packet[*offset] & 0xC0;
+    char labelTag = (packet[*offset] & 0xC0) >> 6;
 
     // Gonna be doing some nested for loops, need 2 counters.
     // Length of the label to read, the offset to start reading from after the label
@@ -125,15 +124,21 @@ int readLabel(unsigned char* packet, int* offset, char* nameToReturn) {
       if (secondCharCounter > 255)
         return -1;
     }
-    if(!isFirstLabel) {
-      nameToReturn[charCounter] = '.';
-      nameToReturn[charCounter + 1] = '\0';
-    }
-    else {
-      isFirstLabel = 0;
+    if (!pointerFollowed) {
+        nameToReturn[secondCharCounter] = '.';
+        nameToReturn[secondCharCounter + 1] = '\0';
     }
 
-    if (labelTag != 0xC0) {
+
+    if (labelTag == 3) {
+      //we have a pointer
+      nextOffset = ntohs(*((unsigned short *)(packet + *offset))) & 0x3fff;
+      readLabel(packet, &nextOffset, nameToReturn, 1);
+
+      *offset = *offset + 2;
+      return 0;      
+    }
+    else if (labelTag == 0) {
       //we know its not a pointer
       // Length of the label is the offset past the packet ex: 3www
       labelLength = packet[*offset];
@@ -151,16 +156,8 @@ int readLabel(unsigned char* packet, int* offset, char* nameToReturn) {
       }
 
       *offset = *offset + labelLength + 1;
-      break;
-    }
-    else if (labelTag == 0xC0) {
-      //we have a pointer
-      nextOffset = ntohs(*((unsigned short *)(packet + *offset))) & 0x3fff;
-      readLabel(packet, &nextOffset, nameToReturn);
-
-      *offset = *offset + 2;
-      return 0;      
-    }
+      readLabel(packet, offset, nameToReturn, 0);
+    }    
     else {
       return -1;
     }
@@ -350,19 +347,18 @@ int main(int argc, char *argv[]) {
   unsigned short ANCOUNT = ntohs(*((unsigned short *)(inputBuffer + 6)));
 
   //16 to skip past the header
-  int nameOffset;
-  nameOffset = ((domainLen % 2 == 0) ? 20 + domainLen : 20 + domainLen);
+  int nameOffset = 20 + domainLen;
 
   for(int i = 0; i < ANCOUNT; i++) {
     char nameReturned[256] = {0};
     unsigned char ipReturned[5] = {0};
-    printf("%i\n", nameOffset);
+    //printf("\n%i\n", ANCOUNT);
     unsigned short ATYPE = ntohs(*((unsigned short *)(inputBuffer + nameOffset)));
     nameOffset += 10; // skip past a bunch of stuff
 
-    dump_packet(inputBuffer, 188);
+    //dump_packet(inputBuffer, 188);
     
-    printf("%d\t%d\n", ATYPE, 0x0001);
+    //printf("%d\t%d\n", ATYPE, 0x0001);
 
     if (ATYPE == 0x0001) {
       ipReturned[0] = *(inputBuffer + nameOffset);
@@ -374,12 +370,11 @@ int main(int argc, char *argv[]) {
       ipReturned[3] = *(inputBuffer + nameOffset);
       nameOffset++;
       printf("IP\t%d.%d.%d.%d\t%s\n", ipReturned[0], ipReturned[1], ipReturned[2], ipReturned[3], authType);
-      break;
     }
     else if (ATYPE == 0x0005) {
-      readLabel(inputBuffer, &nameOffset, nameReturned);
+      readLabel(inputBuffer, &nameOffset, nameReturned, 1);
       printf("CNAME\t%s\t%s\n", nameReturned, authType);
-      break;
+      nameOffset++;
     }
     else {
       //printf("\nsome random bullshit\n");
