@@ -107,6 +107,68 @@ void parseArguments(char* argv[], char* parsedArgs[]) {
 
 }
 
+/*
+The packet, the offset to where you want to start reading depending on the bits that you need the values of, and the domain name to return.
+*/
+int readLabel(unsigned char* packet, int* offset, char* nameToReturn) {
+  int isFirstLabel = 1;
+
+  while (packet[*offset] != '\0') {
+    // labelTag is whether or not its a pointer
+    char labelTag = packet[*offset] & 0xC0;
+
+    // Gonna be doing some nested for loops, need 2 counters.
+    // Length of the label to read, the offset to start reading from after the label
+    int charCounter, secondCharCounter, labelLength, nextOffset;
+
+    for (secondCharCounter = 0; nameToReturn[secondCharCounter] != '\0'; secondCharCounter++) {
+      if (secondCharCounter > 255)
+        return -1;
+    }
+    if(!isFirstLabel) {
+      nameToReturn[charCounter] = '.';
+      nameToReturn[charCounter + 1] = '\0';
+    }
+    else {
+      isFirstLabel = 0;
+    }
+
+    if (labelTag != 0xC0) {
+      //we know its not a pointer
+      // Length of the label is the offset past the packet ex: 3www
+      labelLength = packet[*offset];
+
+      for (charCounter = 1; charCounter <= labelLength; charCounter++) {
+        char temp = packet[*offset + charCounter];
+
+        for (secondCharCounter = 0; nameToReturn[secondCharCounter] != '\0'; secondCharCounter++) {
+          if (secondCharCounter > 255)
+            return -1;
+        }
+
+        nameToReturn[secondCharCounter] = temp;
+        nameToReturn[secondCharCounter + 1] = '\0';
+      }
+
+      *offset = *offset + labelLength + 1;
+      break;
+    }
+    else if (labelTag == 0xC0) {
+      //we have a pointer
+      nextOffset = ntohs(*((unsigned short *)(packet + *offset))) & 0x3fff;
+      readLabel(packet, &nextOffset, nameToReturn);
+
+      *offset = *offset + 2;
+      return 0;      
+    }
+    else {
+      return -1;
+    }
+  }
+  *offset = *offset + 1;
+  return 0;
+}
+
 int main(int argc, char *argv[]) {
   /**
    * I've included some basic code for opening a socket in C, sending
@@ -189,7 +251,7 @@ int main(int argc, char *argv[]) {
   out.sin_port = htons(parsedArgs[2]);
   out.sin_addr.s_addr = inet_addr(parsedArgs[1]);
 
-  if (sendto(sock, packet, domainLen + 18, 0, (struct sockaddr *) &out, sizeof(out)) < 0) {
+  if (sendto(sock, packet, domainLen + 18, 0, &out, sizeof(out)) < 0) {
     // an error occurred
   }
 
@@ -207,10 +269,10 @@ int main(int argc, char *argv[]) {
   t.tv_sec = 5;
   t.tv_usec = 0;
 
-  char inputBuffer[65536];
+  char inputBuffer[188];
   // wait to receive, or for a timeout
   if (select(sock + 1, &socks, NULL, NULL, &t)) {
-    if (recvfrom(sock, inputBuffer, 65536, 0, (struct sockaddr *) &in, &in_len) < 0) {
+    if (recvfrom(sock, inputBuffer, 188, 0, &in, &in_len) < 0) {
       // an error occured
     }
   } else {
@@ -220,13 +282,108 @@ int main(int argc, char *argv[]) {
   }
 
   // print out the result
-  char* returned_header;
+  char* authType;
   unsigned short ID = ntohs(*((unsigned short *) inputBuffer));
+  unsigned char QR = (*(inputBuffer+2) & 0x80) >> 7;
+  unsigned char OPCODE = (*(inputBuffer+2) & 0x78) >> 3;
+  unsigned char AA = (*(inputBuffer+2) & 0x4) >> 2;
+  unsigned char TC = (*(inputBuffer+2) & 0x2) >> 1;
+  unsigned char RA = (*(inputBuffer+2) & 0x80) >> 7;
   unsigned char RCODE = *(inputBuffer + 3) & 0xF;
-  if (RCODE == 3) {
-    printf("NOTFOUND\n");
+
+  if (ID != 0x539) {
+      printf("We got someone else's packet. Stealing all the money out of it");
+      return -1;
+  }
+
+  if (QR != 1) {
+    printf("The QR was wrong");
     return -1;
   }
-  
+
+  if (OPCODE) {
+    printf("The OPCODE was wrong");
+    return -1;
+  }
+
+  if (AA) {
+    authType = "auth";
+  }
+  else {
+    authType = "nonauth";
+  }
+
+  if (TC) {
+    printf("Message got truncated");
+    return -1;
+  }
+
+  if (!RA) {
+    printf("Recursion didnt work");
+    return -1;
+  }
+
+  switch(RCODE) {
+    case 0:
+      break;
+    case 1:
+      printf("Format Error\n"); 
+      return -1;
+    case 2:
+      printf("Server Failure\n"); 
+      return -1;
+    case 3:
+      printf("NOTFOUND\n");
+      return -1;
+    case 4:
+      printf("Not Implemented\n");
+      return -1;
+    case 5:
+      printf("Refused\n");
+      return -1;
+    default:
+      printf("Bad RCODE");
+      return -1;
+  }
+
+  unsigned short QDCOUNT = ntohs(*((unsigned short *)(inputBuffer + 4)));
+  unsigned short ANCOUNT = ntohs(*((unsigned short *)(inputBuffer + 6)));
+
+  //16 to skip past the header
+  int nameOffset = 16 + domainLen;
+
+  for(int i = 0; i < ANCOUNT; i++) {
+    char nameReturned[256] = {0};
+    unsigned char ipReturned[5] = {0};
+
+    unsigned short ATYPE = ntohs(*((unsigned short *)(inputBuffer + nameOffset)));
+    nameOffset += 14; // skip past a bunch of stuff
+
+    //dump_packet(inputBuffer, 188);
+    //printf("%i\n", nameOffset);
+    //printf("%d\t%d\n", ATYPE, 0x0001);
+
+    if (ATYPE == 0x0001) {
+      ipReturned[0] = *(inputBuffer + nameOffset);
+      nameOffset++;
+      ipReturned[1] = *(inputBuffer + nameOffset);
+      nameOffset++;
+      ipReturned[2] = *(inputBuffer + nameOffset);
+      nameOffset++;
+      ipReturned[3] = *(inputBuffer + nameOffset);
+      nameOffset++;
+      printf("IP\t%d.%d.%d.%d\t%s\n", ipReturned[0], ipReturned[1], ipReturned[2], ipReturned[3], authType);
+      break;
+    }
+    else if (ATYPE == 0x0005) {
+      readLabel(inputBuffer, &nameOffset, nameReturned);
+      printf("CNAME\t%s\t%s\n", nameReturned, authType);
+      break;
+    }
+    else {
+      //printf("\nsome random bullshit\n");
+    }
+  }
+
   return 0;
 }
